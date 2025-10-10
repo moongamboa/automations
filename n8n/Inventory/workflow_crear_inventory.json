@@ -1,0 +1,356 @@
+{
+  "name": "workflow_crear_inventory",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "id"
+            },
+            {
+              "name": "usuario"
+            },
+            {
+              "name": "fecha"
+            },
+            {
+              "name": "tipo"
+            },
+            {
+              "name": "detalle"
+            },
+            {
+              "name": "cantidad",
+              "type": "number"
+            },
+            {
+              "name": "precio",
+              "type": "number"
+            },
+            {
+              "name": "estado"
+            }
+          ]
+        }
+      },
+      "id": "4c41bdf9-7fe7-4024-8fd9-dae5df467347",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "Crear",
+        "messageData": "={{ JSON.stringify($json.output[0]) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "e1738572-f042-4521-adc5-efc9ffe0dca0",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "z4E9rjNbJK842giy",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "output",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "27ce3fec-da1a-409f-bfd9-a9fa082bfcb6",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        272
+      ],
+      "id": "d378f555-f50a-4ee0-a13d-870f6c248a68",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "pop",
+        "list": "Crear",
+        "propertyName": "output",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        224,
+        272
+      ],
+      "id": "c9f04b85-4239-48bf-a165-d10a3f200d2b",
+      "name": "Redis2",
+      "credentials": {
+        "redis": {
+          "id": "z4E9rjNbJK842giy",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs",
+          "mode": "list",
+          "cachedResultName": "Gestor inventarios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.output.id }}",
+            "usuario": "={{ $json.output.usuario }}",
+            "fecha": "={{ $json.output.fecha }}",
+            "tipo": "={{ $json.output.tipo }}",
+            "detalle": "={{ $json.output.detalle }}",
+            "cantidad": "={{ $json.output.cantidad }}",
+            "precio": "={{ $json.output.precio }}",
+            "estado": "={{ $json.output.estado }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "usuario",
+              "displayName": "usuario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detalle",
+              "displayName": "detalle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cantidad",
+              "displayName": "cantidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "precio",
+              "displayName": "precio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        240
+      ],
+      "id": "a127ad98-d784-4348-b1af-7cb587f4a592",
+      "name": "Google Sheets1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HcUOyk17ZrQM44Qu",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "102b051b-a6e4-4371-8db9-252da9c9d852",
+              "leftValue": "={{ $json.output }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        432,
+        224
+      ],
+      "id": "3a946dcc-194f-45d0-811a-14789d39c6ac",
+      "name": "If"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Redis2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis2": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Google Sheets1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9d5f9bea-0a4e-4da0-8fad-043b3b443e75",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6062ceb71bb77638c4c3cad02e8e02ab497afc969680733e660362e6497376a2"
+  },
+  "id": "zWV7gpSzcdSiT4s5",
+  "tags": []
+}

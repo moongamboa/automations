@@ -1,0 +1,684 @@
+{
+  "name": "wf_Inventory_ai_agent",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Telegram Trigger').item.json.message.text }}",
+        "options": {
+          "systemMessage": "=Rol y Alcance\n\nEres un Agente Gestor Inteligente de Inventario. Tu misión es:\n- Registrar operaciones de inventario: ventas \n𝑒\n𝑓\n𝑒\n𝑐\n𝑡\n𝑖\n𝑣\n𝑜\n,\n𝑡\n𝑎\n𝑟\n𝑗\n𝑒\n𝑡\n𝑎\n,\n𝑦\n𝑎\n𝑝\n𝑒\nefectivo,tarjeta,yape, ingresos y salidas.\n- Actualizar registros existentes.\n- Eliminar registros.\n- Mostrar registros por fecha o resumen de actividad.\n\nSiempre debes:\n1. Previsualizar la acción al usuario.\n2. Solicitar confirmación explícita \n“¿\n𝑆\nı\nˊ\n𝑜\n𝑁\n𝑜\n?\n”\n“¿S\nı\nˊ\noNo?”.\n3. Ejecutar la acción solo después de confirmación afirmativa.\n4. Enviar un mensaje final con resultado y detalles.\n\nEstructura de cada registro\n\nCada registro incluye:\n- ID: generado automáticamente con UUID v4.\n- Detalle: texto libre.\n- Cantidad: número entero.\n- Precio unitario: número decimal con 2 decimales.\n- Total: cantidad × precio unitario \n𝑑\n𝑜\n𝑠\n𝑑\n𝑒\n𝑐\n𝑖\n𝑚\n𝑎\n𝑙\n𝑒\n𝑠\ndosdecimales.\n- Tipo de registro: venta_efectivo, venta_tarjeta, venta_yape, ingreso, salida.\n- Fecha: si el usuario no la indica, usa {{$now.toFormat('yyyy\\-LL\\-dd')}} \n𝑓\n𝑜\n𝑟\n𝑚\n𝑎\n𝑡\n𝑜\n∗\n∗\n𝑌\n𝑌\n𝑌\n𝑌\n\\-\n𝑀\n𝑀\n\\-\n𝐷\n𝐷\n∗\n∗\nformato∗∗YYYY\\-MM\\-DD∗∗.\n\nReglas Operativas\n\n- En la previsualización, nunca muestres un UUID real. Pon ID: \\(se generará al confirmar\\).\n- Solo tras la confirmación, genera el UUID v4 y muéstralo en el mensaje final.\n- Todos los mensajes deben estar en español neutro, estilo claro y profesional.\n- No uses JSON en las respuestas al usuario; el formato debe ser texto plano legible.\n\nPlantillas de Confirmación\n\nNota clave: Previsualiza sin UUID. Genera y muestra el UUID solo en el mensaje final.\n\n🔎 Previsualización — Crear \n𝑣\n𝑒\n𝑛\n𝑡\n𝑎\n𝑒\n𝑛\n𝑒\n𝑓\n𝑒\n𝑐\n𝑡\n𝑖\n𝑣\n𝑜\nventaenefectivo\nAquí tienes la previsualización del registro\\. Se generará un ID único si confirmas la operación:\n\n---\n💵 Confirmación de venta en efectivo\nID: \\(se generará al confirmar\\)\nDetalle: {{detalle}}\nCantidad: {{cantidad}}\nPrecio unitario: ${{precio_unitario}}\nTotal: {{total}}\nFecha: {{fecha || $now}}\n---\n\n¿Sí o No para confirmar la creación de esta venta?\n\n\n- total = cantidad * precio_unitario con dos decimales.\n- considera que la fecha de hoy es {{ $json.formattedDate }}\n✅ Confirmación FINAL — Crear \n𝑣\n𝑒\n𝑛\n𝑡\n𝑎\n𝑒\n𝑛\n𝑒\n𝑓\n𝑒\n𝑐\n𝑡\n𝑖\n𝑣\n𝑜\nventaenefectivo\n¡Confirmado! La venta ha sido registrada con éxito.\n\n---\n💵 Venta en efectivo registrada\nID: {{uuid_v4_generado}}\nDetalle: {{detalle}}\nCantidad: {{cantidad}}\nPrecio unitario: ${{precio_unitario}}\nTotal: {{total}}\nFecha: {{fecha_resuelta}}\n---\n\n¿Deseas realizar otra operación? \\(crear / actualizar / eliminar / mostrar\\)\n\n✏️ Previsualización — Actualizar\nVas a actualizar el siguiente registro. El ID se mantiene; ver cambios propuestos:\n\nID: {{id}}\nAntes → Después:\n- {{campo1}}: {{antes1}} → {{despues1}}\n- {{campo2}}: {{antes2}} → {{despues2}}\n\n¿Sí o No para confirmar la actualización?\n\n❌ Previsualización — Eliminar\nEstás a punto de eliminar este registro:\n\nID: {{id}}\nDetalle: {{detalle}}\nCantidad: {{cantidad}}\nPrecio unitario: ${{precio_unitario}}\nTipo: {{tipo_registro}}\nFecha: {{fecha}}\n\n¿Sí o No para confirmar la eliminación?\n\n📅 Mostrar por fecha\nMostrando registros del {{fecha || $now}}:\n- Total registros: {{n}}\n- Resumen ventas (efectivo / yape / tarjeta): {{resumen}}\n\n¿Aplicar otro filtro o cambiar la fecha? (Sí/No)\n\nFlujo Conversacional\n\n1. Recibir intención del usuario \n𝑐\n𝑟\n𝑒\n𝑎\n𝑟\n,\n𝑎\n𝑐\n𝑡\n𝑢\n𝑎\n𝑙\n𝑖\n𝑧\n𝑎\n𝑟\n,\n𝑒\n𝑙\n𝑖\n𝑚\n𝑖\n𝑛\n𝑎\n𝑟\n,\n𝑚\n𝑜\n𝑠\n𝑡\n𝑟\n𝑎\n𝑟\ncrear,actualizar,eliminar,mostrar.\n2. Previsualizar con formato humano legible.\n3. Preguntar confirmación.\n4. Si confirma: ejecutar acción, generar UUID si aplica, responder con mensaje final.\n5. Si rechaza: cancelar la operación con un aviso claro.\n\n📝 Integración con Google Sheets\nNueva regla general\n\nCuando el usuario confirma la creación o actualización de un registro, el agente debe escribir los datos en una hoja de cálculo de Google Sheets predefinida.\n\nLa hoja debe tener columnas:\nID | Detalle | Cantidad | Precio unitario | Total | Tipo de registro | Fecha | Fecha_creación | Última_actualización\n\nCrear un registro\n\nPrevisualizar como ya lo hace.\n\nAl confirmar:\n\nGenerar UUID v4.\n\nCalcular total = cantidad * precio_unitario.\n\nResolver la fecha: si no se da, usar $now en YYYY-MM-DD.\n\nInsertar una nueva fila en la Google Sheet con esos datos.\n\nIncluir también:\n\nFecha_creación = $now.\n\nÚltima_actualización = $now.\n\nEnviar al usuario el mensaje de confirmación final con el UUID.\n\nActualizar un registro\n\nPrevisualizar cambios.\n\nAl confirmar:\n\nBuscar en la Google Sheet la fila cuyo ID coincida.\n\nActualizar los campos modificados.\n\nCambiar Última_actualización = $now.\n\nMantener Fecha_creación intacta.\n\nEnviar al usuario confirmación final con los cambios aplicados.\n\nEliminar un registro\n\nSimilar: buscar por ID y borrar esa fila de la Google Sheet.\n\nConfirmar al usuario.\n\nMostrar registros\n\nFiltrar desde la Google Sheet usando la columna Fecha.\n\nGenerar resumen con conteo y totales.\n\nEjemplo en Prompt (añadido)\n🔗 Integración con Google Sheets\n\n- Al CONFIRMAR una creación, inserta el registro en la Google Sheet configurada, con todas las columnas completas.\n- Al CONFIRMAR una actualización, busca el registro por ID y actualiza solo los campos modificados.\n- Al CONFIRMAR una eliminación, elimina la fila con ese ID.\n- Al MOSTRAR, consulta directamente la hoja filtrando por fecha o mostrando todos.\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        288,
+        -144
+      ],
+      "id": "b9967968-8a18-481a-aaf2-46c6b9b84740",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "disable_notification": true
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        -80
+      ],
+      "id": "412d67bb-b656-45d5-bb3a-d3168ded9257",
+      "name": "Send a text message",
+      "webhookId": "7618bc70-bdb8-4b7a-b369-04c50faf5e75",
+      "credentials": {
+        "telegramApi": {
+          "id": "yieixEi9kUSUQxNE",
+          "name": "inventorybot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -368,
+        -96
+      ],
+      "id": "8c6365dd-ee6e-41b6-ad34-18f0c3740910",
+      "name": "Telegram Trigger",
+      "webhookId": "0caf631a-7280-4990-a2d2-3a150b095fa9",
+      "credentials": {
+        "telegramApi": {
+          "id": "yieixEi9kUSUQxNE",
+          "name": "inventorybot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        176,
+        96
+      ],
+      "id": "0f9f5e55-6fcb-405d-b5d5-6834c8d03335",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "IEyVogrOIR5xlVdw",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.from.id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        352,
+        144
+      ],
+      "id": "b3458fa4-6e38-4d7a-9abf-3229e515c15d",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dateTime",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -48
+      ],
+      "id": "c4cfc3fc-c1ff-40e6-a56f-5d0d5ae1cf6f",
+      "name": "Date & Time"
+    },
+    {
+      "parameters": {
+        "operation": "formatDate",
+        "date": "={{ $json.currentDate }}",
+        "format": "yyyy/MM/dd",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dateTime",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        -48
+      ],
+      "id": "0f2dcd32-2a44-4b9f-8daa-07975b2b003e",
+      "name": "Date & Time1"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "usa esta herramienta para mostrar o hacer consultas a la hoja",
+        "documentId": {
+          "__rl": true,
+          "value": "1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs",
+          "mode": "list",
+          "cachedResultName": "Gestor inventarios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "usuario",
+              "lookupValue": "={{ $('Telegram Trigger').item.json.message.chat.first_name }}"
+            },
+            {
+              "lookupColumn": "fecha",
+              "lookupValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('values1_Value', ``, 'string') }}"
+            },
+            {
+              "lookupColumn": "estado",
+              "lookupValue": "registrado"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        656,
+        96
+      ],
+      "id": "65121003-b341-4efd-b1f8-6033c08cd28d",
+      "name": "Mostrar",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HcUOyk17ZrQM44Qu",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "actualizar un registro en Google sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs",
+          "mode": "list",
+          "cachedResultName": "Gestor inventarios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('id__using_to_match_', ``, 'string') }}",
+            "usuario": "={{ $('Telegram Trigger').item.json.message.chat.first_name }}",
+            "fecha": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('fecha', ``, 'string') }}",
+            "tipo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tipo', ``, 'string') }}",
+            "detalle": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('detalle', ``, 'string') }}",
+            "cantidad": "={{ $fromAI('cantidad', ``, 'number') }}",
+            "precio": "={{ $fromAI('precio', ``, 'number') }}",
+            "estado": "actualizado"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "usuario",
+              "displayName": "usuario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detalle",
+              "displayName": "detalle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cantidad",
+              "displayName": "cantidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "precio",
+              "displayName": "precio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        816,
+        144
+      ],
+      "id": "e3118b8d-6d61-4e03-88d0-7c658f7c9b1f",
+      "name": "actualizar",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HcUOyk17ZrQM44Qu",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "eliminar un registro en Google sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs",
+          "mode": "list",
+          "cachedResultName": "Gestor inventarios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ieZ_7Y6GBifL1szc8SbmBifkzDYtVZJGRIK-iM8DEhs/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "estado": "eliminado",
+            "id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('id__using_to_match_', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "usuario",
+              "displayName": "usuario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "detalle",
+              "displayName": "detalle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "cantidad",
+              "displayName": "cantidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "precio",
+              "displayName": "precio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1008,
+        144
+      ],
+      "id": "858f5182-d224-4b08-b894-1305bc8bc5ee",
+      "name": "eliminar",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HcUOyk17ZrQM44Qu",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "crear registros en Google sheets",
+        "workflowId": {
+          "__rl": true,
+          "value": "zWV7gpSzcdSiT4s5",
+          "mode": "list",
+          "cachedResultName": "workflow_crear_inventory"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cantidad": "={{ $fromAI('cantidad', ``, 'number') }}",
+            "precio": "={{ $fromAI('precio', ``, 'number') }}",
+            "id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('id', ``, 'string') }}",
+            "usuario": "={{ $('Telegram Trigger').item.json.message.from.first_name }}",
+            "fecha": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('fecha', ``, 'string') }}",
+            "tipo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tipo', ``, 'string') }}",
+            "detalle": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('detalle', ``, 'string') }}",
+            "estado": "=registrado"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "usuario",
+              "displayName": "usuario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "detalle",
+              "displayName": "detalle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "cantidad",
+              "displayName": "cantidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "precio",
+              "displayName": "precio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        592,
+        304
+      ],
+      "id": "efae2d30-3f5d-49dd-8225-fccdf7475c03",
+      "name": "Crear"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Date & Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date & Time": {
+      "main": [
+        [
+          {
+            "node": "Date & Time1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date & Time1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mostrar": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "actualizar": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "eliminar": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "50488466-cdb2-4076-8042-21b44032caf8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6062ceb71bb77638c4c3cad02e8e02ab497afc969680733e660362e6497376a2"
+  },
+  "id": "gOuZIbpCuSkUPHpw",
+  "tags": []
+}
