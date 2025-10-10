@@ -4,6 +4,8 @@
 Telegram bot to **create / update / delete / show** inventory records, saving everything to **Google Sheets**. Always follows **preview → confirm → execute**.
 
 ## Prereqs
+
+> **Example sheet**: An example Google Sheet is provided in the attached file **“Gestor inventarios”**. Duplicate it and use your own Spreadsheet ID in the workflow.
 - n8n instance
 - Telegram bot token (BotFather)
 - Google Sheets access (Editor)
@@ -42,5 +44,3 @@ Use `parse_mode=MarkdownV2` and escape special characters, or send plain text.
 - **Forbidden / no permission**: wrong creds/scopes or missing Editor on the Sheet/Shared Drive.  
 - **No records for today**: ensure `Fecha` in the sheet is stored as **text `YYYY/MM/DD`** and inputs are normalized.  
 - **Delete by ID fails**: you must **lookup by ID → get row number → delete that row** (or soft delete).
-
-
