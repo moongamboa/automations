@@ -1,0 +1,528 @@
+{
+  "name": "Crypto Portfolio Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 8
+            },
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -560,
+        1136
+      ],
+      "id": "b5c01f12-be51-44db-9758-8db230ec7921",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ids",
+              "value": "bitcoin,ethereum,cardano,solana"
+            },
+            {
+              "name": "vs_currencies",
+              "value": "usd"
+            },
+            {
+              "name": "include_24hr_change",
+              "value": "true"
+            },
+            {
+              "name": "include_24hr_vol",
+              "value": "true"
+            },
+            {
+              "name": "usd_24h_change",
+              "value": "true"
+            },
+            {
+              "name": "include_last_updated_at",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        112,
+        -16
+      ],
+      "id": "3d4a9346-4611-4472-85bb-14ddb532d52a",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        704,
+        176
+      ],
+      "id": "48dce00c-f818-4268-9088-601cb7eb22e2",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "url": "https://www.alphavantage.co/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "function",
+              "value": "GLOBAL_QUOTE"
+            },
+            {
+              "name": "symbol",
+              "value": "AAPL"
+            },
+            {
+              "name": "apikey",
+              "value": "9930O1U69MD4SDPR"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        352
+      ],
+      "id": "3e2d8718-5881-4620-a1d8-7026f4f194c7",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "url": "https://api.exchangerate-api.com/v4/latest/USD",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        176
+      ],
+      "id": "a8bb781a-6541-4ac6-bbee-0e3076d2d590",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========= Helpers =========\nconst r2 = (n) => Math.round(n * 100) / 100;\nconst asObj = (x) => { try { return typeof x === 'string' ? JSON.parse(x) : x; } catch { return null; } };\nconst normKey = (k) => String(k||'').toLowerCase().trim().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');\nconst isNum = (x) => typeof x === 'number' && Number.isFinite(x);\nconst isPlainObj = (x) => x && typeof x === 'object' && !Array.isArray(x);\n// A veces n8n trae los JSON envueltos en array (Always Output Array)\nconst unwrapOne = (v) => (Array.isArray(v) && v.length === 1 ? v[0] : v);\n\n// ========= Entradas y estados =========\nconst inputs = $input.all();\n\nlet cryptoData = null;          // CoinGecko (opcional)\nlet exchangeData = null;        // FX (varios formatos)\nlet sentimentPoints = null;     // Alternative.me (data[])\nlet fgFoundPath = null;         // debug opcional\nconst sheetRows = [];           // Filas normalizadas del Sheet\nglobalThis._fgSingles = [];     // buffer para puntos F&G sueltos\n\n// ---------- Normalizadores para el Sheet ----------\nconst mapRow = (r) => {\n  // normaliza claves a minúscula sin acentos\n  const o = {};\n  for (const [k, v] of Object.entries(r)) o[normKey(k)] = v;\n\n  // mapea sinónimos\n  const name = (o.portafolio ?? o.portfolio ?? o.asset ?? o.coin ?? '').toString().trim();\n  const qty  = o.quantity ?? o.qty ?? o.amount ?? o.cantidad;\n  const buy  = o.buy_price ?? o.buyprice ?? o.cost ?? o.price;\n  const cur  = (o.currency ?? o.divisa ?? 'USD').toString().trim();\n  const st   = (o.state ?? o.status ?? '').toString().trim();\n\n  return { Portafolio: name, quantity: qty, buy_price: buy, currency: cur, state: st };\n};\n\n// Convierte CSV plano a objetos normalizados\nconst parseCSV = (text) => {\n  const lines = text.trim().split(/\\r?\\n/);\n  const headers = lines[0].split(',').map(h => normKey(h));\n  const out = [];\n  for (let i = 1; i < lines.length; i++) {\n    const line = lines[i].trim();\n    if (!line) continue;\n    const vals = line.split(',').map(x => x.trim());\n    const row = {};\n    headers.forEach((h, idx) => row[h] = vals[idx]);\n    out.push(mapRow(row));\n  }\n  return out;\n};\n\n// ---------- Detección hiper-robusta de Fear & Greed ----------\nconst looksLikeFGPoint = (x) =>\n  x && typeof x === 'object' &&\n  ('value' in x) && ('value_classification' in x) && (x.timestamp !== undefined);\n\nconst findFGPointsDeep = (root, maxDepth = 8) => {\n  const seen = new Set();\n  const stack = [{ node: root, path: '$', depth: 0 }];\n  while (stack.length) {\n    const { node, path, depth } = stack.pop();\n    if (node == null) continue;\n\n    // Si es string, intenta parsear JSON y seguir\n    if (typeof node === 'string') {\n      const parsed = asObj(node);\n      if (parsed && parsed !== node) {\n        stack.push({ node: parsed, path: path + '(parsed)', depth });\n      }\n      continue;\n    }\n\n    if (seen.has(node)) continue;\n    if (typeof node !== 'object') continue;\n    seen.add(node);\n\n    // Caso directo: array de puntos\n    if (Array.isArray(node) && node.length && looksLikeFGPoint(node[0])) {\n      return { points: node, foundAt: path + '[*]' };\n    }\n\n    // Caso clásico: { name:'Fear and Greed Index', data:[...] }\n    if (node.name === 'Fear and Greed Index' && Array.isArray(node.data) && node.data.length && looksLikeFGPoint(node.data[0])) {\n      return { points: node.data, foundAt: path + '.data' };\n    }\n\n    // Variante: { data:{ name:'...', data:[...] } }\n    if (isPlainObj(node.data) && node.data.name === 'Fear and Greed Index' &&\n        Array.isArray(node.data.data) && node.data.data.length && looksLikeFGPoint(node.data.data[0])) {\n      return { points: node.data.data, foundAt: path + '.data.data' };\n    }\n\n    // Wrapper común: { data:[...] } sin 'name'\n    if (Array.isArray(node.data) && node.data.length && looksLikeFGPoint(node.data[0])) {\n      return { points: node.data, foundAt: path + '.data' };\n    }\n\n    if (depth >= maxDepth) continue;\n\n    // Seguir recorriendo (en arrays, recorremos elementos; en objetos, sus valores)\n    if (Array.isArray(node)) {\n      for (let i = 0; i < node.length; i++) {\n        stack.push({ node: node[i], path: `${path}[${i}]`, depth: depth + 1 });\n      }\n    } else {\n      for (const [k, v] of Object.entries(node)) {\n        stack.push({ node: v, path: `${path}.${k}`, depth: depth + 1 });\n      }\n    }\n  }\n  return null;\n};\n\n// ========= Recolección de entradas (CoinGecko / FX / Fear & Greed / Sheet) =========\nfor (const input of inputs) {\n  const dataRaw = input.json ?? {};\n  const data = unwrapOne(dataRaw);\n\n  // CoinGecko (simple/price — opcional)\n  if (\n    data?.bitcoin?.usd !== undefined ||\n    data?.ethereum?.usd !== undefined ||\n    (isPlainObj(data) && Object.values(data).some(v => v && typeof v.usd === 'number'))\n  ) cryptoData = data;\n\n  // Tipos de cambio (varios proveedores)\n  if (data?.rates || data?.result || data?.conversion_rates) exchangeData = data;\n\n  // Fear & Greed: búsqueda profunda en el item y en body\n  if (!sentimentPoints) {\n    const hit =\n      findFGPointsDeep(data) ||\n      findFGPointsDeep(data?.body) ||\n      findFGPointsDeep(dataRaw) ||\n      findFGPointsDeep(dataRaw?.body);\n    if (hit && hit.points?.length) {\n      sentimentPoints = hit.points;\n      fgFoundPath = hit.foundAt;\n    }\n  }\n\n  // ***NUEVO***: acumular puntos sueltos si cada item es un punto F&G\n  if (looksLikeFGPoint(data)) {\n    globalThis._fgSingles.push(data);\n  }\n\n  // ---------- Captura flexible de filas del Sheet ----------\n  // 1) items planos ya correctos\n  if ((data?.Portafolio !== undefined || data?.portfolio !== undefined || data?.Portfolio !== undefined) &&\n      (data?.quantity !== undefined || data?.qty !== undefined || data?.cantidad !== undefined)) {\n    sheetRows.push(mapRow(data));\n  }\n\n  // 2) arrays de objetos: rows / records / items / data\n  for (const key of ['rows','records','items','data']) {\n    if (Array.isArray(data?.[key]) && data[key].length && typeof data[key][0] === 'object' && !Array.isArray(data[key][0])) {\n      for (const r of data[key]) sheetRows.push(mapRow(r));\n    }\n  }\n\n  // 2.5) ***NUEVO***: si el item ES un array en la raíz con objetos tipo fila\n  if (Array.isArray(data) && data.length && typeof data[0] === 'object' && !Array.isArray(data[0])) {\n    for (const r of data) sheetRows.push(mapRow(r));\n  }\n\n  // 3) array de arrays con 'values' (primera fila = headers)\n  if (Array.isArray(data?.values) && Array.isArray(data.values[0])) {\n    const headers = data.values[0].map(h => normKey(h));\n    const idx = (name) => headers.indexOf(name);\n    const idxP = idx('portafolio') !== -1 ? idx('portafolio') : (idx('portfolio') !== -1 ? idx('portfolio') : -1);\n    const idxQ = idx('quantity') !== -1 ? idx('quantity') : (idx('qty') !== -1 ? idx('qty') : -1);\n    const idxB = idx('buy_price') !== -1 ? idx('buy_price') : (idx('buyprice') !== -1 ? idx('buyprice') : -1);\n    const idxC = idx('currency');\n    const idxS = idx('state');\n    if (idxP !== -1 && idxQ !== -1) {\n      for (let i = 1; i < data.values.length; i++) {\n        const r = data.values[i];\n        sheetRows.push(mapRow({\n          portafolio: r[idxP],\n          quantity  : r[idxQ],\n          buy_price : idxB !== -1 ? r[idxB] : undefined,\n          currency  : idxC !== -1 ? r[idxC] : 'USD',\n          state     : idxS !== -1 ? r[idxS] : undefined,\n        }));\n      }\n    }\n  }\n\n  // 4) CSV crudo en texto\n  if (typeof data === 'string' && /portafolio\\s*,\\s*quantity/i.test(data)) {\n    sheetRows.push(...parseCSV(data));\n  }\n}\n\n// Si no encontramos un array y sí hay puntos sueltos acumulados, úsalos (ordenados por timestamp asc)\nif (!sentimentPoints && Array.isArray(globalThis._fgSingles) && globalThis._fgSingles.length) {\n  sentimentPoints = globalThis._fgSingles\n    .slice()\n    .sort((a,b) => Number(a.timestamp) - Number(b.timestamp));\n}\n\n// ========= Tipos de cambio (con fallback) =========\n// Valor por defecto si no llega la API: 1 USD = 0.92 EUR\nlet usdToEur = 0.92;\nif (exchangeData) {\n  const rates = exchangeData.rates || exchangeData.result || exchangeData.conversion_rates || {};\n  if (isNum(rates.EUR)) usdToEur = rates.EUR;\n  // Si la base es EUR, y te dan USD, invierte\n  if (exchangeData.base === 'EUR' && isNum(rates.USD)) usdToEur = 1 / rates.USD;\n}\n// sanidad\nif (!isNum(usdToEur) || usdToEur <= 0) usdToEur = 0.92;\nconst eurToUsd = 1 / usdToEur;\n\n// ========= Construcción del portafolio =========\n// Agrupa filas por moneda y guarda filas originales (para convertir buy_price según currency)\nconst portfolio = {};\nfor (const row of sheetRows) {\n  const state = String(row.state ?? '').trim().toLowerCase();\n  if (state && state !== 'registered') continue;\n\n  let rawName = (row.Portafolio ?? '').toString().trim().toLowerCase();\n  // si alguien puso \"cardano 2\", quédate con el token alfabético\n  rawName = rawName.split(/[^\\p{L}\\-]+/u)[0];\n  if (!rawName) continue;\n\n  const qty = parseFloat(String(row.quantity).replace(',', '.'));\n  if (!isFinite(qty) || qty <= 0) continue;\n\n  const buyPriceRaw = parseFloat(String(row.buy_price ?? '').replace(',', '.'));\n  const currency = String(row.currency ?? 'USD').trim().toUpperCase();\n  const buyPrice = isFinite(buyPriceRaw) ? buyPriceRaw : 0;\n\n  if (!portfolio[rawName]) portfolio[rawName] = { amount: 0, rows: [] };\n  portfolio[rawName].amount += qty;\n  portfolio[rawName].rows.push({ qty, buyPrice, currency });\n}\n\nconst entries = Object.entries(portfolio);\nif (entries.length === 0) {\n  throw new Error(\"Portafolio vacío tras normalización (revisa Portafolio/quantity en los items de entrada).\");\n}\n\n// Convierte filas por moneda a costBasisUSD agregado (ahora que ya tenemos usdToEur/eurToUsd)\nfor (const [coin, agg] of Object.entries(portfolio)) {\n  let costUSD = 0;\n  for (const r of agg.rows) {\n    let pUSD = r.buyPrice;\n    if (r.currency === 'EUR') pUSD = r.buyPrice * eurToUsd;\n    // (si usas otras divisas, conviértelas aquí)\n    costUSD += pUSD * r.qty;\n  }\n  agg.costBasisUSD = costUSD;\n}\n\n// ========= Cálculos por moneda =========\nlet cryptoValueUSD = 0;\nlet totalCostBasisUSD = 0;\nconst cryptoDetails = [];\n\nfor (const [coin, agg] of entries) {\n  const amount = agg.amount;\n\n  const priceUSD = cryptoData?.[coin]?.usd ?? 0;\n  const change24hCoin =\n    (cryptoData?.[coin]?.usd_24h_change ??\n     cryptoData?.[coin]?.price_change_percentage_24h ??\n     0); // %\n\n  const valueUSD = priceUSD * amount;\n\n  cryptoValueUSD += valueUSD;\n  totalCostBasisUSD += agg.costBasisUSD;\n\n  const avgBuyPriceUSD = (agg.costBasisUSD > 0 && amount > 0) ? (agg.costBasisUSD / amount) : 0;\n  const profitUSD = valueUSD - agg.costBasisUSD;\n  const profitPercent = agg.costBasisUSD > 0 ? (profitUSD / agg.costBasisUSD) * 100 : null;\n\n  const priceEUR = priceUSD * usdToEur;\n  const valueEUR = valueUSD * usdToEur;\n  const costBasisEUR = agg.costBasisUSD * usdToEur;\n  const profitEUR = profitUSD * usdToEur;\n\n  cryptoDetails.push({\n    coin: coin.toUpperCase(),\n    amount,\n    priceUSD: r2(priceUSD),\n    valueUSD: r2(valueUSD),\n    priceEUR: r2(priceEUR),\n    valueEUR: r2(valueEUR),\n    change24h: r2(change24hCoin),   // %\n    avgBuyPriceUSD: r2(avgBuyPriceUSD),\n    costBasisUSD: r2(agg.costBasisUSD),\n    profitUSD: r2(profitUSD),\n    profitPercent: profitPercent !== null ? r2(profitPercent) : null,\n    costBasisEUR: r2(costBasisEUR),\n    profitEUR: r2(profitEUR),\n  });\n}\n\n// ========= 24h REAL del portafolio (ponderado) =========\n// Para cada cripto: prev = current / (1 + pct)\nlet totalCurrentEUR = 0;\nlet totalYesterdayEUR = 0;\n\nfor (const c of cryptoDetails) {\n  const currentEUR = c.valueUSD * usdToEur;\n  const pct = (c.change24h ?? 0) / 100;\n  const prevEUR = (pct > -1) ? (currentEUR / (1 + pct)) : 0;\n  totalCurrentEUR += currentEUR;\n  totalYesterdayEUR += prevEUR;\n}\n\n// (Si agregas acciones, súmalas aquí con su propio % 24h)\nconst change24hEUR = totalCurrentEUR - totalYesterdayEUR;\nconst changePercent = totalYesterdayEUR > 0 ? (change24hEUR / totalYesterdayEUR) * 100 : 0;\n\nconst totalUSD = cryptoValueUSD;\nconst totalEUR = totalCurrentEUR;\n\n// ========= Sentiment 7D (Alternative.me) =========\nlet sentiment = null;\nif (Array.isArray(sentimentPoints) && sentimentPoints.length) {\n  const ptsNewestFirst = sentimentPoints.map(d => ({\n    idx: parseInt(d.value, 10),\n    label: String(d.value_classification),\n    ts: new Date(parseInt(d.timestamp, 10) * 1000).toISOString(),\n  }));\n  const pts = [...ptsNewestFirst].reverse();     // viejo -> nuevo\n  const values = pts.map(p => p.idx);\n\n  const avg = values.reduce((a,b)=>a+b,0) / values.length;\n  const min = Math.min(...values);\n  const max = Math.max(...values);\n  const start = values[0];                       // ~hace 7 días\n  const end   = values[values.length - 1];       // hoy\n  const delta = end - start;\n  const trendPct = start > 0 ? (delta / start) * 100 : 0;\n\n  // Racha desde hoy hacia atrás (1 sube, -1 baja)\n  let streakDir = 0, streakLen = 1;\n  for (let i = values.length - 1; i > 0; i--) {\n    const diff = values[i] - values[i - 1];\n    const dir = diff > 0 ? 1 : diff < 0 ? -1 : 0;\n    if (streakDir === 0) streakDir = dir || streakDir;\n    if (dir === streakDir && dir !== 0) streakLen++;\n    else break;\n  }\n\n  sentiment = {\n    today: { index: end, label: pts[pts.length - 1].label, timestamp: pts[pts.length - 1].ts },\n    week:  {\n      avg: r2(avg), min, max, delta, trendPct: r2(trendPct),\n      fearDays: pts.filter(p => /fear/i.test(p.label)).length,\n      greedDays: pts.filter(p => /greed/i.test(p.label)).length,\n      streak: { direction: streakDir, length: streakLen },\n      sparkline: values\n    }\n  };\n}\n\n// ========= Totales / PnL =========\nconst totalCostBasisEUR = (totalCostBasisUSD ?? 0) * usdToEur;\nconst totalProfitUSD = totalUSD - (totalCostBasisUSD ?? 0);\nconst totalProfitEUR = totalProfitUSD * usdToEur;\nconst totalProfitPercent = (totalCostBasisUSD ?? 0) > 0 ? (totalProfitUSD / totalCostBasisUSD) * 100 : null;\n\n// ========= Salida =========\nconst out = {\n  portfolio: {\n    totalEUR: r2(totalEUR),\n    totalCostBasisEUR: r2(totalCostBasisEUR),\n    totalProfitEUR: r2(totalProfitEUR),\n    totalProfitPercent: totalProfitPercent !== null ? r2(totalProfitPercent) : null,\n    change24hEUR: r2(change24hEUR),\n    changePercent: r2(changePercent),\n    cryptoValueEUR: r2(totalCurrentEUR),\n    stockValueEUR: 0,\n  },\n  crypto: cryptoDetails,\n  exchangeRate: { usdToEur },\n  sentiment,\n  timestamp: new Date().toISOString(),\n};\n\n// Resumen corto (seguro aunque falte CoinGecko o FX)\nout.summary = `Portfolio: €${Math.round(out.portfolio.totalEUR)} | 24h: ${out.portfolio.changePercent.toFixed(2)}% (${out.portfolio.change24hEUR >= 0 ? '+' : ''}€${Math.round(out.portfolio.change24hEUR)}) | PnL: €${Math.round(out.portfolio.totalProfitEUR)}${sentiment ? ` | F&G hoy: ${sentiment.today.index} (${sentiment.today.label})` : ''}`;\n\n// (Opcional) Debug mínimo: descomenta para ver por dónde encontró F&G y cuántas filas de sheet detectó\n out._debug = { gotFG: !!sentimentPoints, fgFoundPath, sheetRows: sheetRows.length };\n\nreturn [{ json: out, pairedItem: { item: 0 } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        192
+      ],
+      "id": "6db97312-662f-47fa-85a8-b788d505775f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Portfolio Analysis (en EUR)\n\n📊 Resumen general:\n- Valor total: €{{ $json.portfolio.totalEUR }}\n- PnL total: €{{ $json.portfolio.totalProfitEUR }} ({{ $json.portfolio.totalProfitPercent?.toFixed(2) ?? '0.00' }}%)\n- 24h (real): €{{ $json.portfolio.change24hEUR }} ({{ $json.portfolio.changePercent.toFixed(2) }}%)\n- USD→EUR: {{ $json.exchangeRate.usdToEur.toFixed(4) }}\n\n🧠 Sentimiento (Fear & Greed):\n- Hoy: {{ $json.sentiment?.today?.index ?? 'NA' }} ({{ $json.sentiment?.today?.label ?? 'NA' }})\n- Media 7D: {{ $json.sentiment?.week?.avg ?? 'NA' }} | Delta 7D: {{ $json.sentiment?.week?.delta ?? 'NA' }} pts ({{ $json.sentiment?.week?.trendPct ?? 'NA' }}%)\n- Días Fear/Greed: {{ $json.sentiment?.week?.fearDays ?? 0 }}/{{ $json.sentiment?.week?.greedDays ?? 0 }}\n- Racha: {{\n  (() => {\n    const dir = $json.sentiment?.week?.streak?.direction;\n    const len = $json.sentiment?.week?.streak?.length;\n    if (dir === 1) return `↑ ${len} días`;\n    if (dir === -1) return `↓ ${len} días`;\n    return '—';\n  })()\n}}\n\n💰 Distribución del portafolio:\n{{ $json.crypto.map(c => `${c.coin}: ${(c.valueEUR / $json.portfolio.totalEUR * 100).toFixed(2)}%`).join('\\n') }}\n\n🪙 Rendimiento por activo:\n{{ $json.crypto.map(c => `${c.coin} → Precio €${c.priceEUR}, 24h ${c.change24h.toFixed(2)}%, PnL €${c.profitEUR} (${c.profitPercent?.toFixed(2) ?? 0}%), Valor €${c.valueEUR}`).join('\\n') }}\n\n📈 Agregados:\n- Mejor performer: {{\n  (() => {\n    const a = $json.crypto;\n    if (!a?.length) return 'NA';\n    const t = a.reduce((x,y)=> (x.profitPercent ?? -1e9) > (y.profitPercent ?? -1e9) ? x : y);\n    return `${t.coin} (${(t.profitPercent ?? 0).toFixed(2)}%)`;\n  })()\n}}\n- Peor performer: {{\n  (() => {\n    const a = $json.crypto;\n    if (!a?.length) return 'NA';\n    const w = a.reduce((x,y)=> (x.profitPercent ?? 1e9) < (y.profitPercent ?? 1e9) ? x : y);\n    return `${w.coin} (${(w.profitPercent ?? 0).toFixed(2)}%)`;\n  })()\n}}\n\n🧩 Instrucción (no alucinar):\n- Analiza SOLO los datos mostrados arriba (no inventes cifras ni tendencias externas).\n- Entrega: 1) resumen del desempeño, 2) observación clave del día, 3) UNA recomendación (mantener/vender/comprar) con justificación numérica, 4) perspectiva breve del mercado en función del Fear & Greed (hoy/7D).\n- Tono profesional, veraz y analítico. Máximo 150 palabras.\n",
+        "options": {
+          "systemMessage": "=Eres un analista financiero especializado en criptomonedas y mercados globales.\n\nRecibirás un JSON con:\n\nValor total del portafolio (EUR)\nPnL total (absoluto y %)\nRendimiento 24h real del portafolio (ponderado)\nDesglose por activo (precio actual, cambio 24h, PnL, valor)\nÍndice de miedo y codicia (Fear & Greed) actual y promedio 7D (si disponible)\n\n\nTu tarea\nGenera dos versiones del mismo análisis: primero en español, luego en inglés.\nCada versión debe ser breve, veraz y accionable, con máximo 150 palabras por idioma, e incluir:\n\nResumen del desempeño general (valor total, cambio 24h, PnL).\nObservación clave sobre movimientos diarios o tendencias notables.\nRecomendación específica y única (mantener, vender o comprar) basada solo en los datos proporcionados (sin especulación externa).\nPerspectiva de mercado usando el Fear & Greed (actual y promedio 7D), o indicar claramente si faltan datos.\nFormato de salida (Markdown)\n\nES:\n\nResumen del Desempeño General: …\nObservación Clave: …\nRecomendación Específica: …\nPerspectiva de Mercado: …\n\nEN:\n\nOverall Performance Summary: …\nKey Observation: …\nSpecific Recommendation: …\nMarket Outlook: …\n\nReglas\n\nNo inventes números ni tendencias; usa únicamente los valores del JSON (p. ej., portfolio.totalEUR, portfolio.changePercent, portfolio.totalProfitEUR, crypto[].change24h, sentiment.today.index, sentiment.week.avg).\n\nSi algún dato no está disponible, dilo explícitamente (“no hay datos suficientes…” / “insufficient data…”).\n\nUsa formato porcentual con 2 decimales y símbolo %; usa € para importes.\n\nTono profesional, analítico y claro.\n\nNo incluyas el JSON en la respuesta. No superes 150 palabras por idioma."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        1296,
+        192
+      ],
+      "id": "9d102e08-b70c-40a3-bea8-2c6c18758da5",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1264,
+        432
+      ],
+      "id": "eecab356-6750-40b4-a782-23fd0b898609",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "IEyVogrOIR5xlVdw",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1648,
+        192
+      ],
+      "id": "8df3c765-1638-4d6f-ab86-e15a9f649b09",
+      "name": "Send a text message",
+      "webhookId": "5c905e17-c656-4c83-a99b-3ae41aa62806",
+      "credentials": {
+        "telegramApi": {
+          "id": "nkZZdQ8nzkBOpHxd",
+          "name": "Telegram account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -512,
+        240
+      ],
+      "id": "9285fff6-7f0d-4b34-a0cc-5e6fbcd238cc",
+      "name": "Telegram Trigger",
+      "webhookId": "544a5261-6bcc-4ca4-a107-e0120a43d527",
+      "credentials": {
+        "telegramApi": {
+          "id": "nkZZdQ8nzkBOpHxd",
+          "name": "Telegram account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "13Mb0FzUhTgISzvb4dB0ZgoIy-Hs88y-8OxwHZPdnKY4",
+          "mode": "list",
+          "cachedResultName": "cryptos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13Mb0FzUhTgISzvb4dB0ZgoIy-Hs88y-8OxwHZPdnKY4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13Mb0FzUhTgISzvb4dB0ZgoIy-Hs88y-8OxwHZPdnKY4/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "state",
+              "lookupValue": "registered"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -672,
+        864
+      ],
+      "id": "13d479e4-b3b1-498a-b86d-96c2821581bd",
+      "name": "cryptos",
+      "alwaysOutputData": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HcUOyk17ZrQM44Qu",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vQSZKR9YiYotXuoRJVXUxA2vM-Iss164oH5W1o4h9jYC2qIkih3ht8GJF3Rh1VdGeVcvcGpb6IRy6EH/pub?gid=0&single=true&output=csv",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "state",
+              "value": "registered"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        560
+      ],
+      "id": "06425354-adf7-41e6-8e26-d39f4d995602",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convierte CSV plano en items JSON\nconst csvData = $json.data || ''; \nconst lines = csvData.trim().split('\\n');\nconst headers = lines[0].split(',').map(h => h.trim());\nconst items = [];\n\nfor (let i = 1; i < lines.length; i++) {\n  const values = lines[i].split(',').map(v => v.trim());\n  const obj = {};\n  headers.forEach((h, idx) => { obj[h] = values[idx]; });\n  items.push({ json: obj });\n}\n\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        464
+      ],
+      "id": "c15f7c61-7365-443d-aba9-c7c3840abd74",
+      "name": "CSV parser"
+    },
+    {
+      "parameters": {
+        "url": "https://api.alternative.me/fng/?limit=7",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        768
+      ],
+      "id": "b52bda60-5aba-4b55-92b7-5f5922e184d8",
+      "name": "HTTP Request4"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.body ?? $json;\nconst obj = (typeof raw === 'string') ? JSON.parse(raw) : raw;\nreturn [{ json: obj }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        736
+      ],
+      "id": "c2725377-7334-4617-8d4b-d01659fff424",
+      "name": "Code"
+    }
+  ],
+  "pinData": {
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-09-10T22:19:10.551-05:00",
+          "Readable date": "September 10th 2025, 10:19:10 pm",
+          "Readable time": "10:19:10 pm",
+          "Day of week": "Wednesday",
+          "Year": "2025",
+          "Month": "September",
+          "Day of month": "10",
+          "Hour": "22",
+          "Minute": "19",
+          "Second": "10",
+          "Timezone": "America/Bogota (UTC-05:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cryptos": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "CSV parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CSV parser": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "589df655-e458-4842-a2b9-579d09348324",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6062ceb71bb77638c4c3cad02e8e02ab497afc969680733e660362e6497376a2"
+  },
+  "id": "pOj4WW691C7kKyVh",
+  "tags": []
+}
