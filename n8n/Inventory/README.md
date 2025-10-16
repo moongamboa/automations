@@ -1,4 +1,4 @@
-# Inventory Manager Bot (n8n) — Quick README
+# Inventory Manager Bot (n8n)
 
 ## What it does
 Telegram bot to **create / update / delete / show** inventory records, saving everything to **Google Sheets**. Always follows **preview → confirm → execute**.
